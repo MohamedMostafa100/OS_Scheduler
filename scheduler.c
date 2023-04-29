@@ -270,6 +270,10 @@ void Algorithm_SRTN(struct Queue_Log **const logQueue, int *const processorIdleT
                     //Update remaining time
                     runningPCB->remainingTime = receivedAction.time;
                 } 
+
+                if(running && !runningPCB){ //No processes to schedule but the generator still not finished
+                    (*processorIdleTime)++;
+                }
             }
         }
     }
@@ -390,6 +394,10 @@ void Algorithm_HPF(struct Queue_Log **const logQueue, int *const processorIdleTi
                     enqueue_Log(*logQueue, createLog(currentTime, EV_STARTED, runningPCB));
                     //Update remaining time
                     runningPCB->remainingTime = receivedAction.time;
+                }
+
+                if(running && !runningPCB){ //No processes to schedule but the generator still not finished
+                    (*processorIdleTime)++;
                 } 
             }
         }
@@ -486,7 +494,6 @@ void Algorithm_RR(int *const quantum, struct Queue_Log **const logQueue, int *co
             if(receivedAction.action == ACT_STOP){
                 struct Node_PCB *nextPCB = NULL;
                 if(runningPCB==queue->end){
-
                     nextPCB = queue->start;
                 }
                 else{
@@ -529,11 +536,17 @@ void Algorithm_RR(int *const quantum, struct Queue_Log **const logQueue, int *co
                     //Update quantum
                     q++;
                 }
+                else{
+                    runningPCB = NULL; //Free current process
+                }
+
+                if(running && !runningPCB){ //No processes to schedule but the generator still not finished
+                    (*processorIdleTime)++;
+                }
             }
             else if(q == *quantum){
                 struct Node_PCB *nextPCB = NULL;
                 if(runningPCB==queue->end){
-
                     nextPCB = queue->start;
                 }
                 else{
