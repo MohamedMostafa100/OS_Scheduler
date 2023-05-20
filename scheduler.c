@@ -4,10 +4,11 @@ void passTime(int signum);
 int msgqID;
 int currentTime = 0;
 bool running = false;
-
-void Algorithm_SRTN(struct Queue_Log **const logQueue, int *const processorIdleTime, int *const processWaitingTime, float *const processWeightedTurnaround,  float *const deviation, int *const processNumber);
-void Algorithm_HPF(struct Queue_Log **const logQueue, int *const processorIdleTime, int *const processWaitingTime, float *const processWeightedTurnaround, float *const deviation, int *const processNumber);
-void Algorithm_RR(int *const quantum, struct Queue_Log **const logQueue, int *const processorIdleTime, int *const processWaitingTime, float *const processWeightedTurnaround, float *const deviation, int *const processNumber);
+float Each_WTA[1000];
+int Each_WTA_counter=0;
+void Algorithm_SRTN(struct Queue_Log **const logQueue,struct Queue_MemoryLog **const MemoryLogQueue, int *const processorIdleTime, int *const processWaitingTime, float *const processWeightedTurnaround,  float *const deviation, int *const processNumber);
+void Algorithm_HPF(struct Queue_Log **const logQueue, struct Queue_MemoryLog **const MemoryLogQueue, int *const processorIdleTime, int *const processWaitingTime, float *const processWeightedTurnaround, float *const deviation, int *const processNumber);
+void Algorithm_RR(int *const quantum, struct Queue_Log **const logQueue,struct Queue_MemoryLog **const MemoryLogQueue, int *const processorIdleTime, int *const processWaitingTime, float *const processWeightedTurnaround, float *const deviation, int *const processNumber);
 
 int main(int argc, char *argv[])
 {
@@ -15,7 +16,8 @@ int main(int argc, char *argv[])
     initClk();
 
     //TODO: implement the scheduler.
-
+   // create memory log queue
+    struct Queue_MemoryLog * MemoryLogQueue=createQueue_MemoryLog();
     // Receive arguments
     enum Algorithm schedulingAlgorithm = (enum Algorithm)atoi(argv[1]);
     int quantum = atoi(argv[2]);
@@ -42,13 +44,13 @@ int main(int argc, char *argv[])
     switch (schedulingAlgorithm)
     {
     case ALGO_SRTN:
-        Algorithm_SRTN(&logQueue, &processorIdleTime, &processWaitingTime, &processWeightedTurnaround, &deviation, &processNumber);
+        Algorithm_SRTN(&logQueue,&MemoryLogQueue, &processorIdleTime, &processWaitingTime, &processWeightedTurnaround, &deviation, &processNumber);
         break;
     case ALGO_HPF:
-        Algorithm_HPF(&logQueue, &processorIdleTime, &processWaitingTime, &processWeightedTurnaround, &deviation, &processNumber);
+        Algorithm_HPF(&logQueue,&MemoryLogQueue, &processorIdleTime, &processWaitingTime, &processWeightedTurnaround, &deviation, &processNumber);
         break;
     case ALGO_RR:
-        Algorithm_RR(&quantum, &logQueue, &processorIdleTime, &processWaitingTime, &processWeightedTurnaround, &deviation, &processNumber);
+        Algorithm_RR(&quantum, &logQueue,&MemoryLogQueue, &processorIdleTime, &processWaitingTime, &processWeightedTurnaround, &deviation, &processNumber);
     default:
         break;
     }
@@ -56,12 +58,12 @@ int main(int argc, char *argv[])
     //Prepare log file
     FILE *schedulerLog;
     schedulerLog = fopen("scheduler.log", "w");
-
-    while (logQueue->start)
+    fprintf(schedulerLog, "#At time x process y state arr w total z remain y wait k\n");
+    while (logQueue->front)
     {
         char event[10];
 
-        switch (logQueue->start->event)
+        switch (logQueue->front->event)
         {
         case EV_STARTED:
             strcpy(event, "started");
@@ -81,14 +83,14 @@ int main(int argc, char *argv[])
         default:
             break;
         }
-        fprintf(schedulerLog, "#At time %d process %d %s arr %d total %d remain %d wait %d", logQueue->start->time, logQueue->start->id, event, logQueue->start->arrivalTime, logQueue->start->totalTime, logQueue->start->remainingTime, logQueue->start->waitingTime);
+        fprintf(schedulerLog, "At time %d process %d %s arr %d total %d remain %d wait %d", logQueue->front->time, logQueue->front->id, event, logQueue->front->arrivalTime, logQueue->front->totalTime, logQueue->front->remainingTime, logQueue->front->waitingTime);
         if (strcmp(event, "finished") == 0)
         {
-            fprintf(schedulerLog, " TA %d WTA %0.2f\n", logQueue->start->totalTime + logQueue->start->waitingTime, ((float)(logQueue->start->totalTime + logQueue->start->waitingTime) / logQueue->start->totalTime));
+            fprintf(schedulerLog, " TA %d WTA %0.2f\n", logQueue->front->totalTime + logQueue->front->waitingTime, ((float)(logQueue->front->totalTime + logQueue->front->waitingTime) / logQueue->front->totalTime));
         }
         else
         {
-            fprintf(schedulerLog, "\n");
+            fprintf(schedulerLog, "\n");//terminate the line
         }
 
         free(dequeue_Log(logQueue));
@@ -98,7 +100,33 @@ int main(int argc, char *argv[])
 
     free(logQueue);
 
-    //Prepare perf file
+
+     FILE * memoryLog;
+    memoryLog = fopen("memory.log", "w");
+    fprintf(schedulerLog, "#At time x Allocated y bytes for process z from i to j\n");
+    while (MemoryLogQueue->start)
+    {
+        char m[10];
+        switch (MemoryLogQueue->start->m)
+        {
+        case Allocated:
+            strcpy(m, "Allocated");
+            break;
+
+        case freed:
+            strcpy(m, "freed");
+            break;
+        default:
+            break;
+        }
+        fprintf(memoryLog, "At time %d %s %d bytes for process %d from %d to %d", MemoryLogQueue->start->time, m, MemoryLogQueue->start->memsize, MemoryLogQueue->start->processId,MemoryLogQueue->start->i,MemoryLogQueue->start->j - 1);
+        fprintf(memoryLog, "\n");
+        free(dequeue_MemoryLog(MemoryLogQueue));
+    }
+    fclose(memoryLog);
+
+
+    //Prepare performance file for writing the performance info
     FILE *schedulerPerf;
     schedulerPerf = fopen("scheduler.perf", "w");
 
@@ -106,7 +134,12 @@ int main(int argc, char *argv[])
     fprintf(schedulerPerf, "CPU utilization = %.2f%%\n", ((float)(currentTime - processorIdleTime) * 100 / currentTime));
     fprintf(schedulerPerf, "Avg WTA = %.2f\n", ((float)processWeightedTurnaround / processNumber));
     fprintf(schedulerPerf, "Avg Waiting = %.2f\n", ((float)processWaitingTime / processNumber));
-    fprintf(schedulerPerf, "Standard deviation = %.2f\n", sqrt((deviation / processNumber)));
+    float storesum=0;
+    for(int i=0;i<Each_WTA_counter;i++)storesum+=Each_WTA[i];
+    float averageWTA=storesum/processNumber;
+    float sumSquared=0;
+    for(int i=0;i<Each_WTA_counter;i++)sumSquared+=pow(Each_WTA[i]-averageWTA,2);
+    fprintf(schedulerPerf, "Std WTA = %.2f\n", sqrt((sumSquared / processNumber)));
 
     fclose(schedulerPerf);
 
@@ -121,20 +154,29 @@ int main(int argc, char *argv[])
 
 }
 /*---------------------------------------------------------------SRTN----------------------------------------------------------------*/
-void Algorithm_SRTN(struct Queue_Log **const logQueue, int *const processorIdleTime, int *const processWaitingTime, float *const processWeightedTurnaround, float *const deviation, int *const processNumber)
+void Algorithm_SRTN(struct Queue_Log **const logQueue,struct Queue_MemoryLog **const MemoryLogQueue, int *const processorIdleTime, int *const processWaitingTime, float *const processWeightedTurnaround, float *const deviation, int *const processNumber)
 {
+        // Create a new queue of processes
     struct Queue_PCB *queue = createQueue_PCB();
+        // The process currently running on the processor
     struct Node_PCB *runningPCB = NULL;
 
-    struct Message_Action receivedAction;
-    struct Message_Process receivedProcess;
-    struct Message_Generator receivedStat;
+    struct Queue_PCB *Waitqueue = createQueue_PCB();
 
-    //Start Scheduling
+  // The messages received from the message queue
+    struct Message_Action receivedAction; // has action and time
+    struct Message_Process receivedProcess; //has attached process
+    struct Message_Generator receivedStat; //has status
+
+   // memory part
+    struct Memory_Node *root = CreateMemoryNode(1024, 0);
+    struct Memory_Node *node = NULL;
+
+    //Scheduling started
     msgrcv(msgqID, &receivedAction, sizeof(receivedAction.time) + sizeof(receivedAction.action), getppid(), !IPC_NOWAIT);
     running = true;
-
-    while(running || queue->start){
+    // Keep running while there are still processes in the queue or processes from the generator
+    while(running || queue->front){
         //Check if no more processes from process generator
         msgrcv(msgqID, &receivedAction, sizeof(receivedAction.time) + sizeof(receivedAction.action), getppid(), !IPC_NOWAIT);
         if(receivedAction.action==ACT_STOP){
@@ -145,8 +187,10 @@ void Algorithm_SRTN(struct Queue_Log **const logQueue, int *const processorIdleT
         printf("Time now: %d \n",currentTime);
         fflush(stdout);
 
+        // Receive the status message from the generator
         msgrcv(msgqID, &receivedStat, sizeof(receivedStat.status), getppid(), !IPC_NOWAIT);
         while(receivedStat.status == GEN_SEND){
+                        // Receive the process message from the generator
             msgrcv(msgqID, &receivedProcess, sizeof(receivedProcess.attachedProcess), getppid(), !IPC_NOWAIT);
             printf("process %d Received at time: %d \n",receivedProcess.attachedProcess.id,currentTime);
             fflush(stdout);
@@ -167,22 +211,38 @@ void Algorithm_SRTN(struct Queue_Log **const logQueue, int *const processorIdleT
                 exit(1);
             }
 
-            struct Node_PCB *newPCB = createPCB(processPID, createProcess(receivedProcess.attachedProcess.id, receivedProcess.attachedProcess.arrivalTime, receivedProcess.attachedProcess.runTime, receivedProcess.attachedProcess.priority));
-            timeEnqueue_PCB(queue, newPCB, newPCB->process->runTime);
+            struct Node_PCB *newPCB = createPCB(processPID, createProcess(receivedProcess.attachedProcess.id, receivedProcess.attachedProcess.arrivalTime, receivedProcess.attachedProcess.runTime, receivedProcess.attachedProcess.priority, receivedProcess.attachedProcess.memsize));
+            //timeEnqueue_PCB(queue, newPCB, newPCB->process->runTime);
+            node = mem_insert(root, newPCB->process);
+            if(node){
+                timeEnqueue_PCB(queue, newPCB, newPCB->process->runTime);
+                newPCB->memoryNode = node;
+                enqueue_MemoryLog(*MemoryLogQueue, createMemoryLog(currentTime, Allocated, node, newPCB));
+            }
+            else{
+                normalEnqueue_PCB(Waitqueue, newPCB);
+            }
+            // allocate in Memory
+           // newPCB->memoryNode = node;
+          //  enqueue_MemoryLog(*MemoryLogQueue, createMemoryLog(currentTime, Allocated, node, newPCB));
             msgrcv(msgqID, &receivedStat, sizeof(receivedStat.status), getppid(), !IPC_NOWAIT);
         }
 
+        // Create a new action message to send to the process
         struct Message_Action sendAction;
-        //3 cases 1.No process currently scheduled 2.The next process isn't the current one 3.Stick to the current process
+        //3 cases 
+        // 1.No process currently scheduled 
+        // 2.The next process isn't the current one 
+        // 3.Stick to the current process
         if(!runningPCB){
-            runningPCB = queue->start;
+            runningPCB = queue->front;
             if(runningPCB){
                 sendAction.mType = runningPCB->pid;
-                sendAction.action = ACT_RUN; // sending process start action
+                sendAction.action = ACT_RUN; // sending process front action
                 sendAction.time = currentTime;
-                // schedular send start info to running process
+                // schedular send front info to running process
                 msgsnd(msgqID, &sendAction, sizeof(sendAction.time) + sizeof(sendAction.action), !IPC_NOWAIT);
-                // waiting for process to send a start action
+                // waiting for process to send a front action
                 msgrcv(msgqID, &receivedAction, sizeof(receivedAction.time) + sizeof(receivedAction.action), getpid(), !IPC_NOWAIT);
                 // update waiting time
                 runningPCB->waitingTime = currentTime - runningPCB->process->arrivalTime;
@@ -195,10 +255,10 @@ void Algorithm_SRTN(struct Queue_Log **const logQueue, int *const processorIdleT
             }
              
         }
-        else if(runningPCB != queue->start){
+        else if(runningPCB != queue->front){
             runningPCB->stoppageTime= currentTime;
             enqueue_Log(*logQueue, createLog(currentTime, EV_STOPPED, runningPCB));
-            runningPCB = queue->start;
+            runningPCB = queue->front;
             if(runningPCB){
                 sendAction.mType = runningPCB->pid;
                 sendAction.action = ACT_RUN; // sending process start action
@@ -223,7 +283,7 @@ void Algorithm_SRTN(struct Queue_Log **const logQueue, int *const processorIdleT
             }
         }
         else{
-            //runningPCB = queue->start;
+            //runningPCB = queue->front;
             sendAction.mType = runningPCB->pid;
             sendAction.action = ACT_RUN; // sending process start action
             sendAction.time = currentTime;
@@ -238,8 +298,11 @@ void Algorithm_SRTN(struct Queue_Log **const logQueue, int *const processorIdleT
             }
             else{
                 enqueue_Log(*logQueue, createLog(currentTime, EV_FINISHED, runningPCB));
+                mem_delete(runningPCB->memoryNode);                    
+                enqueue_MemoryLog(*MemoryLogQueue, createMemoryLog(currentTime, freed, runningPCB->memoryNode, runningPCB));
                 (*processWaitingTime) += runningPCB->waitingTime;
                 (*processWeightedTurnaround) += ((float)((runningPCB->waitingTime + runningPCB->process->runTime)) / runningPCB->process->runTime);
+                Each_WTA[Each_WTA_counter++]=((float)((runningPCB->waitingTime + runningPCB->process->runTime)) / runningPCB->process->runTime);
                 (*deviation) += pow(((float)(runningPCB->waitingTime + runningPCB->process->runTime) / runningPCB->process->runTime) - (float)((runningPCB->waitingTime + runningPCB->process->runTime)),2);
                 (*processNumber)++;
                 // current PCB is not pointing to the current process anymore
@@ -247,7 +310,20 @@ void Algorithm_SRTN(struct Queue_Log **const logQueue, int *const processorIdleT
                 // remove current pcb from queue
                 free(remove_PCB(queue, runningPCB));
                 // running pcb will be the next PCB in queue
-                runningPCB = queue->start;
+                while(Waitqueue->front){
+                    struct Node_PCB *newPCB = Waitqueue->front;
+                    node = mem_insert(root, newPCB->process);
+                    if(node){
+                        dequeue_PCB(Waitqueue);
+                        timeEnqueue_PCB(queue, newPCB, newPCB->process->runTime);
+                        newPCB->memoryNode = node;
+                        enqueue_MemoryLog(*MemoryLogQueue, createMemoryLog(currentTime, Allocated, node, newPCB));
+                    }
+                    else{
+                        break;
+                    }
+                }
+                runningPCB = queue->front;
                 if(runningPCB){
                     sendAction.mType = runningPCB->pid;
                     sendAction.action = ACT_RUN; // sending process start action
@@ -280,20 +356,24 @@ void Algorithm_SRTN(struct Queue_Log **const logQueue, int *const processorIdleT
     free(queue);
 }
 /*---------------------------------------------------------------Non-Prempetive HPF--------------------------------------------------*/
-void Algorithm_HPF(struct Queue_Log **const logQueue, int *const processorIdleTime, int *const processWaitingTime, float *const processWeightedTurnaround, float *const deviation, int *const processNumber)
+void Algorithm_HPF(struct Queue_Log **const logQueue,struct Queue_MemoryLog **const MemoryLogQueue, int *const processorIdleTime, int *const processWaitingTime, float *const processWeightedTurnaround, float *const deviation, int *const processNumber)
 {
     struct Queue_PCB *queue = createQueue_PCB();
     struct Node_PCB *runningPCB = NULL;
 
+    struct Queue_PCB *Waitqueue = createQueue_PCB();
+
     struct Message_Action receivedAction;
     struct Message_Process receivedProcess;
     struct Message_Generator receivedStat;
-
+   // memory part
+    struct Memory_Node *root = CreateMemoryNode(1024, 0);
+    struct Memory_Node *node = NULL;
     //Start Scheduling
     msgrcv(msgqID, &receivedAction, sizeof(receivedAction.time) + sizeof(receivedAction.action), getppid(), !IPC_NOWAIT);
     running = true;
 
-    while(running || queue->start){
+    while(running || queue->front){
         //Check if no more processes from process generator
         msgrcv(msgqID, &receivedAction, sizeof(receivedAction.time) + sizeof(receivedAction.action), getppid(), !IPC_NOWAIT);
         if(receivedAction.action==ACT_STOP){
@@ -303,7 +383,10 @@ void Algorithm_HPF(struct Queue_Log **const logQueue, int *const processorIdleTi
         currentTime = receivedAction.time;
         printf("Time now: %d \n",currentTime);
         fflush(stdout);
+        // functions for testing
+        // printf("jimmy %d",currentTime);
 
+        //we now receive the status that's reported on the message queue between the process_generator and the scheduler
         msgrcv(msgqID, &receivedStat, sizeof(receivedStat.status), getppid(), !IPC_NOWAIT);
         while(receivedStat.status == GEN_SEND){
             msgrcv(msgqID, &receivedProcess, sizeof(receivedProcess.attachedProcess), getppid(), !IPC_NOWAIT);
@@ -326,15 +409,30 @@ void Algorithm_HPF(struct Queue_Log **const logQueue, int *const processorIdleTi
                 exit(1);
             }
 
-            struct Node_PCB *newPCB = createPCB(processPID, createProcess(receivedProcess.attachedProcess.id, receivedProcess.attachedProcess.arrivalTime, receivedProcess.attachedProcess.runTime, receivedProcess.attachedProcess.priority));
-            priorityEnqueue_PCB(queue, newPCB, newPCB->process->priority);
+            struct Node_PCB *newPCB = createPCB(processPID, createProcess(receivedProcess.attachedProcess.id, receivedProcess.attachedProcess.arrivalTime, receivedProcess.attachedProcess.runTime, receivedProcess.attachedProcess.priority, receivedProcess.attachedProcess.memsize));
+            //priorityEnqueue_PCB(queue, newPCB, newPCB->process->priority);
+            node = mem_insert(root, newPCB->process);
+            if(node){
+                priorityEnqueue_PCB(queue, newPCB, newPCB->process->priority);
+                newPCB->memoryNode = node;
+                enqueue_MemoryLog(*MemoryLogQueue, createMemoryLog(currentTime, Allocated, node, newPCB));
+            }
+            else{
+                normalEnqueue_PCB(Waitqueue, newPCB);
+            }
+            // allocate in Memory
+            //newPCB->memoryNode = node;
+            //enqueue_MemoryLog(*MemoryLogQueue, createMemoryLog(currentTime, Allocated, node, newPCB));
             msgrcv(msgqID, &receivedStat, sizeof(receivedStat.status), getppid(), !IPC_NOWAIT);
         }
 
         struct Message_Action sendAction;
-        //2 cases 1.No process currently scheduled 2.Stick to the current process
+        //2 cases 
+        // 1.No process currently scheduled 
+        // 2.Stick to the current process
+        //allocating to a new process
         if(!runningPCB){
-            runningPCB = queue->start;
+            runningPCB = queue->front;
             if(runningPCB){
                 sendAction.mType = runningPCB->pid;
                 sendAction.action = ACT_RUN; // sending process start action
@@ -343,10 +441,11 @@ void Algorithm_HPF(struct Queue_Log **const logQueue, int *const processorIdleTi
                 msgsnd(msgqID, &sendAction, sizeof(sendAction.time) + sizeof(sendAction.action), !IPC_NOWAIT);
                 // waiting for process to send a start action
                 msgrcv(msgqID, &receivedAction, sizeof(receivedAction.time) + sizeof(receivedAction.action), getpid(), !IPC_NOWAIT);
-                // update waiting time
+                // we update the waiting time of the process
+                //by jimmy
                 runningPCB->waitingTime = currentTime - runningPCB->process->arrivalTime;
                 enqueue_Log(*logQueue, createLog(currentTime, EV_STARTED, runningPCB));
-                //Update remaining time
+                //we update the remaining time
                 runningPCB->remainingTime = receivedAction.time; 
             }
             else{
@@ -355,7 +454,7 @@ void Algorithm_HPF(struct Queue_Log **const logQueue, int *const processorIdleTi
              
         }
         else{
-            //runningPCB = queue->start;
+            //runningPCB = queue->front;
             sendAction.mType = runningPCB->pid;
             sendAction.action = ACT_RUN; // sending process start action
             sendAction.time = currentTime;
@@ -369,9 +468,13 @@ void Algorithm_HPF(struct Queue_Log **const logQueue, int *const processorIdleTi
                 runningPCB->remainingTime = receivedAction.time; 
             }
             else{
+                //now we compute the statistics 
                 enqueue_Log(*logQueue, createLog(currentTime, EV_FINISHED, runningPCB));
+                mem_delete(runningPCB->memoryNode);                    
+                enqueue_MemoryLog(*MemoryLogQueue, createMemoryLog(currentTime, freed, runningPCB->memoryNode, runningPCB));
                 (*processWaitingTime) += runningPCB->waitingTime;
                 (*processWeightedTurnaround) += ((float)((runningPCB->waitingTime + runningPCB->process->runTime)) / runningPCB->process->runTime);
+                Each_WTA[Each_WTA_counter++]=((float)((runningPCB->waitingTime + runningPCB->process->runTime)) / runningPCB->process->runTime);
                 (*deviation) += pow(((float)(runningPCB->waitingTime + runningPCB->process->runTime) / runningPCB->process->runTime) - (float)((runningPCB->waitingTime + runningPCB->process->runTime)),2);
 
                 (*processNumber)++;
@@ -380,7 +483,20 @@ void Algorithm_HPF(struct Queue_Log **const logQueue, int *const processorIdleTi
                 // remove current pcb from queue
                 free(remove_PCB(queue, runningPCB));
                 // running pcb will be the next PCB in queue
-                runningPCB = queue->start;
+                while(Waitqueue->front){
+                    struct Node_PCB *newPCB = Waitqueue->front;
+                    node = mem_insert(root, newPCB->process);
+                    if(node){
+                        dequeue_PCB(Waitqueue);
+                        priorityEnqueue_PCB(queue, newPCB, newPCB->process->priority);
+                        newPCB->memoryNode = node;
+                        enqueue_MemoryLog(*MemoryLogQueue, createMemoryLog(currentTime, Allocated, node, newPCB));
+                    }
+                    else{
+                        break;
+                    }
+                }
+                runningPCB = queue->front;
                 if(runningPCB){
                     sendAction.mType = runningPCB->pid;
                     sendAction.action = ACT_RUN; // sending process start action
@@ -405,20 +521,25 @@ void Algorithm_HPF(struct Queue_Log **const logQueue, int *const processorIdleTi
     free(queue);
 }
 /*---------------------------------------------------------------RR------------------------------------------------------------------*/
-void Algorithm_RR(int *const quantum, struct Queue_Log **const logQueue, int *const processorIdleTime, int *const processWaitingTime, float *const processWeightedTurnaround, float *const deviation, int *const processNumber){
+void Algorithm_RR(int *const quantum, struct Queue_Log **const logQueue,struct Queue_MemoryLog **const MemoryLogQueue, int *const processorIdleTime, int *const processWaitingTime, float *const processWeightedTurnaround, float *const deviation, int *const processNumber){
     struct Queue_PCB *queue = createQueue_PCB();
     struct Node_PCB *runningPCB = NULL;
+
+    struct Queue_PCB *Waitqueue = createQueue_PCB();
 
     struct Message_Action receivedAction;
     struct Message_Process receivedProcess;
     struct Message_Generator receivedStat;
     int q = 0;
+   // memory part
+    struct Memory_Node *root = CreateMemoryNode(1024, 0);
+    struct Memory_Node *node = NULL;
 
     //Start Scheduling
     msgrcv(msgqID, &receivedAction, sizeof(receivedAction.time) + sizeof(receivedAction.action), getppid(), !IPC_NOWAIT);
     running = true;
 
-    while(running || queue->start){
+    while(running || queue->front){
         //Check if no more processes from process generator
         msgrcv(msgqID, &receivedAction, sizeof(receivedAction.time) + sizeof(receivedAction.action), getppid(), !IPC_NOWAIT);
         if(receivedAction.action==ACT_STOP){
@@ -451,15 +572,27 @@ void Algorithm_RR(int *const quantum, struct Queue_Log **const logQueue, int *co
                 exit(1);
             }
 
-            struct Node_PCB *newPCB = createPCB(processPID, createProcess(receivedProcess.attachedProcess.id, receivedProcess.attachedProcess.arrivalTime, receivedProcess.attachedProcess.runTime, receivedProcess.attachedProcess.priority));
-            normalEnqueue_PCB(queue, newPCB);
+            struct Node_PCB *newPCB = createPCB(processPID, createProcess(receivedProcess.attachedProcess.id, receivedProcess.attachedProcess.arrivalTime, receivedProcess.attachedProcess.runTime, receivedProcess.attachedProcess.priority, receivedProcess.attachedProcess.memsize));
+            //normalEnqueue_PCB(queue, newPCB);
+            node = mem_insert(root, newPCB->process);
+            if(node){
+                normalEnqueue_PCB(queue, newPCB);
+                newPCB->memoryNode = node;
+                enqueue_MemoryLog(*MemoryLogQueue, createMemoryLog(currentTime, Allocated, node, newPCB));
+            }
+            else{
+                normalEnqueue_PCB(Waitqueue, newPCB);
+            }
+            // allocate in Memory
+            //newPCB->memoryNode = node;
+            //enqueue_MemoryLog(*MemoryLogQueue, createMemoryLog(currentTime, Allocated, node, newPCB));
             msgrcv(msgqID, &receivedStat, sizeof(receivedStat.status), getppid(), !IPC_NOWAIT);
         }
 
         struct Message_Action sendAction;
         //2 cases 1.No process currently scheduled 2.Stick to the current process(check if finished or quantum passed)
         if(!runningPCB){
-            runningPCB = queue->start;
+            runningPCB = queue->front;
             if(runningPCB){
                 sendAction.mType = runningPCB->pid;
                 sendAction.action = ACT_RUN; // sending process start action
@@ -492,16 +625,34 @@ void Algorithm_RR(int *const quantum, struct Queue_Log **const logQueue, int *co
             msgrcv(msgqID, &receivedAction, sizeof(receivedAction.time) + sizeof(receivedAction.action), getpid(), !IPC_NOWAIT);
             
             if(receivedAction.action == ACT_STOP){
+                while(Waitqueue->front){
+                    struct Node_PCB *newPCB = Waitqueue->front;
+                    node = mem_insert(root, newPCB->process);
+                    if(node){
+                        dequeue_PCB(Waitqueue);
+                        normalEnqueue_PCB(queue, newPCB);
+                        newPCB->memoryNode = node;
+                        enqueue_MemoryLog(*MemoryLogQueue, createMemoryLog(currentTime, Allocated, node, newPCB));
+                    }
+                    else{
+                        break;
+                    }
+                }
                 struct Node_PCB *nextPCB = NULL;
-                if(runningPCB==queue->end){
-                    nextPCB = queue->start;
+                if(runningPCB==queue->rear){
+                    nextPCB = queue->front;
+                    //points to the next of runningprocess as I'll free runningPCB 
                 }
                 else{
                     nextPCB = runningPCB->next;
                 }
                 enqueue_Log(*logQueue, createLog(currentTime, EV_FINISHED, runningPCB));
+                mem_delete(runningPCB->memoryNode);                    
+                enqueue_MemoryLog(*MemoryLogQueue, createMemoryLog(currentTime, freed, runningPCB->memoryNode, runningPCB));
                 (*processWaitingTime) += runningPCB->waitingTime;
                 (*processWeightedTurnaround) += ((float)((currentTime)-runningPCB->process->arrivalTime) / runningPCB->process->runTime);
+                Each_WTA[Each_WTA_counter++]=((float)((currentTime)-runningPCB->process->arrivalTime) / runningPCB->process->runTime);
+                // Each_WTA[Each_WTA_counter++]=(*processWeightedTurnaround);
                 (*deviation) += pow((*processWeightedTurnaround)- (float)((currentTime)-runningPCB->process->arrivalTime),2);
                 (*processNumber)++;
                 // current PCB is not pointing to the current process anymore
@@ -512,7 +663,7 @@ void Algorithm_RR(int *const quantum, struct Queue_Log **const logQueue, int *co
                 q=0;
                 // running pcb will be the next PCB in queue
                 runningPCB = nextPCB;
-                if(runningPCB && queue->start){ //To ensure the next process is in the queue
+                if(runningPCB && queue->front){ //To ensure the next process is in the queue
                     sendAction.mType = runningPCB->pid;
                     sendAction.action = ACT_RUN; // sending process start action
                     sendAction.time = currentTime;
@@ -538,6 +689,7 @@ void Algorithm_RR(int *const quantum, struct Queue_Log **const logQueue, int *co
                 }
                 else{
                     runningPCB = NULL; //Free current process
+                    //nothing works now
                 }
 
                 if(running && !runningPCB){ //No processes to schedule but the generator still not finished
@@ -546,12 +698,13 @@ void Algorithm_RR(int *const quantum, struct Queue_Log **const logQueue, int *co
             }
             else if(q == *quantum){
                 struct Node_PCB *nextPCB = NULL;
-                if(runningPCB==queue->end){
-                    nextPCB = queue->start;
+                if(runningPCB==queue->rear){
+                    nextPCB = queue->front;
                 }
                 else{
                     nextPCB = runningPCB->next;
                 }
+                // if quantum has finished but the current process is the only one in the queue
                 if(runningPCB != nextPCB){
                     runningPCB->stoppageTime= currentTime;
                     enqueue_Log(*logQueue, createLog(currentTime, EV_STOPPED, runningPCB));
@@ -587,12 +740,13 @@ void Algorithm_RR(int *const quantum, struct Queue_Log **const logQueue, int *co
                 q++;
             }
             else{
+                //neither quantum nor the process had finished
                 sendAction.mType = runningPCB->pid;
                 sendAction.action = ACT_RUN; // sending process start action
                 sendAction.time = currentTime;
                 // schedular send start info to running process
                 msgsnd(msgqID, &sendAction, sizeof(sendAction.time) + sizeof(sendAction.action), !IPC_NOWAIT);
-                // waiting for process to send a start action
+                // waiting for process to send a front action
                 msgrcv(msgqID, &receivedAction, sizeof(receivedAction.time) + sizeof(receivedAction.action), getpid(), !IPC_NOWAIT);
                 //Update remaining time
                 runningPCB->remainingTime = receivedAction.time;

@@ -1,5 +1,5 @@
 #include "headers.h"
-
+//by Mohamed Salman
 void clearResources(int);
 void terminate(int);
 int msgqID;
@@ -20,7 +20,6 @@ int main(int argc, char *argv[])
         perror("Error! Please make sure you added a correct input file name as your first argument\n");
         exit(1);
     }
-    //printf("%s \n",argv[1]);
     FILE *inputFile = fopen(argv[1], "r");
     if (!inputFile)
     {
@@ -31,25 +30,38 @@ int main(int argc, char *argv[])
     int arrivalTime;
     int runTime;
     int priority;
+    int memsize;
     while(true) //While loop to read from the file
     {
-        int result = fscanf(inputFile, "%d\t%d\t%d\t%d", &id, &arrivalTime, &runTime, &priority);
+        int result = fscanf(inputFile, "%d\t%d\t%d\t%d\t%d", &id, &arrivalTime, &runTime, &priority,&memsize);
 
         if (result == EOF)  //If at end oof file, break out of loop
         {
             break;
         }
-        else if (result == 4)   //If line is correct (found 4 integers), enqueue a new process
-        {
-            struct Node_Process * newProcess=createProcess(id, arrivalTime, runTime, priority);
-            enqueue_Process(processQueue, newProcess);
-        }
+        // else if (result == 4)   //If line is correct (found 4 integers), enqueue a new process
+        // {
+        //     // struct Node_Process * newProcess=createProcess(id, arrivalTime, runTime, priority);
+        //     struct Node_Process * newProcess=createProcess(id, arrivalTime, runTime, priority,memsize);
+        //     enqueue_Process(processQueue, newProcess);
+        // }
+        else if (result == 5)   //If line is correct (found 4 integers), enqueue a new process
+            {
+                if(memsize>256)
+                {
+                    perror("Error,Please make sure each process size is less than or equal 256 bytes!");
+                    exit(1);
+                }
+                struct Node_Process * newProcess=createProcess(id, arrivalTime, runTime, priority,memsize);
+                //printf("%d %d %d %d %d",id,arrivalTime,runTime,priority,memsize);
+                enqueue_Process(processQueue, newProcess);
+            }
         else    //Skip this line
         {
             while (fgetc(inputFile) != '\n');
         }
     }
-    if (processQueue->start == NULL)
+    if (processQueue->front == NULL)
     {
         perror("Error! Please make sure you added a correct input file name as your first argument\n");
         exit(1);
@@ -81,19 +93,19 @@ int main(int argc, char *argv[])
         {
             if (argc < 6)
             {
-                perror("Error! Please specify a quantum size for Round Robin Algorithm\n");
+                perror("Error! Enter a quantum size for Round Robin Algorithm\n");
                 exit(1);
             }
             if (strcmp(argv[4], "-q") != 0)
             {
-                perror("Error! Please specify a quantum size for Round Robin Algorithm\n");
+                perror("Error! Enter a quantum size for Round Robin Algorithm\n");
                 exit(1);
             }
 
             int q = atoi(argv[5]);
             if (q <= 0)
             {
-                perror("Error! Please specify a correct quantum size for Round Robin Algorithm\n");
+                perror("Error! Enter a correct quantum size for Round Robin Algorithm\n");
                 exit(1);
             }
             quantum = q;
@@ -148,16 +160,16 @@ int main(int argc, char *argv[])
     // 4. Use this function after creating the clock process to initialize clock.
     initClk();
     // To get time use this function. 
-    //int x = getClk();
+    //int x = getClk(); 
+    //note the getClk() function causes an unintentional delay if read lately (CPU dependent) 
     //printf("Current Time is %d\n", x);
-    // TODO Generation Main Loop
-    // 5. Create a data structure for processes and provide it with its parameters.
+    // 5. Create a data structure for processes and provide it with its parameters
     // 6. Send the information to the scheduler at the appropriate time.
     key_t msgqKey = ftok("keyfile.txt", MQKEY);
     msgqID = msgget(msgqKey, 0666 | IPC_CREAT);
     if (msgqID == -1)
     {
-        perror("Error creating message queue");
+        perror("Error! Message queue wasn't created successfully");
         exit(1);
     }
 
@@ -165,7 +177,7 @@ int main(int argc, char *argv[])
     struct Message_Process sentProcess;
     struct Message_Generator stat; 
 
-    struct Message_Action sentAction;
+    struct Message_Action sentAction;//needed to notify the scheduler of any actions listed in the enum
 
     sentAction.mType = getpid();
     sentAction.action = ACT_RUN;
@@ -180,7 +192,7 @@ int main(int argc, char *argv[])
     {
         if (currentTime < clkTime)  //If the process generator is late and should execute it's code
         {
-            if(!processQueue->start){
+            if(!processQueue->front){
                 sentAction.mType = getpid();
                 sentAction.action = ACT_STOP;
                 sentAction.time = currentTime;
@@ -194,13 +206,14 @@ int main(int argc, char *argv[])
                 msgsnd(msgqID, &sentAction, sizeof(sentAction.time) + sizeof(sentAction.action), !IPC_NOWAIT);
             }
 
-            while (processQueue->start && processQueue->start->arrivalTime <= currentTime)  //If the current process should be sent out (Arrival time <= Current time)
+            while (processQueue->front && processQueue->front->arrivalTime <= currentTime)  //If the current process should be sent out (Arrival time <= Current time)
             {
                 sentProcess.mType = getpid();
-                sentProcess.attachedProcess.id = processQueue->start->id;
-                sentProcess.attachedProcess.arrivalTime = processQueue->start->arrivalTime;
-                sentProcess.attachedProcess.runTime = processQueue->start->runTime;
-                sentProcess.attachedProcess.priority = processQueue->start->priority;
+                sentProcess.attachedProcess.id = processQueue->front->id;
+                sentProcess.attachedProcess.arrivalTime = processQueue->front->arrivalTime;
+                sentProcess.attachedProcess.runTime = processQueue->front->runTime;
+                sentProcess.attachedProcess.priority = processQueue->front->priority;
+                sentProcess.attachedProcess.memsize = processQueue->front->memsize;
                 free(dequeue_Process(processQueue));
                 stat.mType = getpid();
                 stat.status = GEN_SEND;
